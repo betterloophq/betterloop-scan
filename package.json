@@ -1,0 +1,54 @@
+{
+  "name": "betterloop-scan",
+  "version": "0.1.2",
+  "description": "Local, read-only scan of how much damage the AI coding agents on this machine could do",
+  "keywords": [
+    "ai-agents",
+    "claude-code",
+    "codex",
+    "cursor",
+    "security",
+    "secrets",
+    "mcp",
+    "blast-radius",
+    "developer-tools",
+    "cli"
+  ],
+  "license": "MIT",
+  "homepage": "https://betterloop.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/betterloophq/betterloop-scan.git"
+  },
+  "bugs": {
+    "url": "https://github.com/betterloophq/betterloop-scan/issues"
+  },
+  "type": "module",
+  "bin": {
+    "betterloop-scan": "dist/cli.mjs"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "prepack": "pnpm build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --maxWorkers=2",
+    "format": "prettier --write src README.md package.json build.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24",
+    "esbuild": "^0.25.12",
+    "prettier": "^3.8.3",
+    "typescript": "^6",
+    "vitest": "^3"
+  }
+}
