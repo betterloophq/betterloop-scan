@@ -43,6 +43,25 @@ npx betterloop-scan --json
 
 The exit code is `0` on success, even when findings exist. Bad flags exit with `2`.
 
+## Use as a library
+
+```ts
+import { scan } from "betterloop-scan"
+
+const result = scan({
+  agents: ["claude-code"],
+  scope: "project",
+  path: process.cwd(),
+  home: os.homedir(),
+  env: process.env,
+})
+console.log(result.score, result.label)
+```
+
+`scan` is synchronous and read-only. Findings carry masked text only, never secret values.
+
+`run(argv, io, onResult)` runs the full CLI (flags, questions, report) and calls `onResult` with the result after printing.
+
 ## What it checks
 
 The agent choice only filters check 2. Checks 1, 3 and 4 always run, because any agent on the machine can reach what they cover.

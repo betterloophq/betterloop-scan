@@ -4,7 +4,7 @@ import { createInterface } from "node:readline/promises"
 import type { Readable, Writable } from "node:stream"
 import { detectAgents } from "./checks/agents.js"
 import { jsonReport, terminal } from "./report.js"
-import { scan } from "./scan.js"
+import { scan, type ScanResult } from "./scan.js"
 import { AGENT_NAMES, type AgentId, type Env, type Scope } from "./types.js"
 
 export interface Io {
@@ -62,7 +62,13 @@ function pickAgents(
   return picked
 }
 
-export async function run(argv: string[], io: Io): Promise<number> {
+// `onResult` runs after the report is printed, so a slow hook never delays the output.
+// It must not throw: an error here is reported as a failed run.
+export async function run(
+  argv: string[],
+  io: Io,
+  onResult?: (result: ScanResult) => Promise<void> | void
+): Promise<number> {
   const out = (s: string) => void io.stdout.write(s)
   if (io.platform === "win32") {
     out("Windows is not supported yet\n")
@@ -145,6 +151,7 @@ export async function run(argv: string[], io: Io): Promise<number> {
       prodAccounts,
     })
     out(args.json ? jsonReport(result, notes) : terminal(result, notes))
+    await onResult?.(result)
     return 0
   } catch (e) {
     out(`${(e as Error).message}\n`)

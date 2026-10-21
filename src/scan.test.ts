@@ -503,6 +503,46 @@ describe("cli", () => {
     expect(out.agents).toEqual([])
     expect(out.notes.join(" ")).toContain("Cursor is not installed")
   })
+  it("calls onResult once with the result, after the report is printed", async () => {
+    const s = sandbox()
+    const c = capture()
+    const seen: { score: number; printed: boolean }[] = []
+    await run(
+      ["--home", s.home, "--path", s.project],
+      {
+        env: { PATH: "" },
+        stdin: new Readable({ read() {} }),
+        stdout: c.stdout,
+        isTTY: false,
+        platform: "linux",
+        cwd: s.project,
+      },
+      (r) =>
+        void seen.push({
+          score: r.score,
+          printed: c.text().includes("Top 5 fixes"),
+        })
+    )
+    expect(seen).toEqual([{ score: 100, printed: true }])
+  })
+  it("does not call onResult when the run fails", async () => {
+    const c = capture()
+    let called = false
+    const code = await run(
+      ["--bogus"],
+      {
+        env: {},
+        stdin: new Readable({ read() {} }),
+        stdout: c.stdout,
+        isTTY: false,
+        platform: "linux",
+        cwd: "/",
+      },
+      () => void (called = true)
+    )
+    expect(code).toBe(2)
+    expect(called).toBe(false)
+  })
   it("prints a notice on Windows", async () => {
     const c = capture()
     const code = await run([], {
