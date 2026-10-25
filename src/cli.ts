@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 import { createInterface } from "node:readline/promises"
 import type { Readable, Writable } from "node:stream"
 import { detectAgents } from "./checks/agents.js"
-import { jsonReport, terminal } from "./report.js"
+import { compact, details, jsonReport } from "./report.js"
 import { scan, type ScanResult } from "./scan.js"
 import { AGENT_NAMES, type AgentId, type Env, type Scope } from "./types.js"
 
@@ -26,13 +26,15 @@ interface Args {
   home?: string
   prodAccounts?: string
   json: boolean
+  details: boolean
 }
 
 function parse(argv: string[]): Args {
-  const a: Args = { json: false }
+  const a: Args = { json: false, details: false }
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i]
     if (k === "--json") a.json = true
+    else if (k === "--details") a.details = true
     else if (
       ["--agent", "--scope", "--path", "--home", "--prod-accounts"].includes(k)
     ) {
@@ -150,7 +152,25 @@ export async function run(
       env: io.env,
       prodAccounts,
     })
-    out(args.json ? jsonReport(result, notes) : terminal(result, notes))
+    if (args.json) out(jsonReport(result, notes))
+    else {
+      const color = io.isTTY && !io.env.NO_COLOR
+      out(compact(result, notes, color))
+      const hidden = result.findings.length
+      if (args.details) out(details(result))
+      else if (hidden && io.isTTY) {
+        const rl = createInterface({ input: io.stdin, output: io.stdout })
+        try {
+          const answer = await rl.question(
+            `\n${hidden} findings hidden. Show them? [y/N] `
+          )
+          if (/^y(es)?$/i.test(answer.trim())) out(details(result))
+        } finally {
+          rl.close()
+        }
+      } else if (hidden)
+        out(`\n${hidden} findings hidden. Run with --details to see them.\n`)
+    }
     await onResult?.(result)
     return 0
   } catch (e) {

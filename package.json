@@ -1,6 +1,6 @@
 {
   "name": "betterloop-scan",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Local, read-only scan of how much damage the AI coding agents on this machine could do",
   "keywords": [
     "ai-agents",

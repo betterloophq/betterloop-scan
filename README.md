@@ -23,6 +23,8 @@ Run it in a terminal and it asks two questions:
 1. **Which coding agent do you want to check?** Claude Code, Codex, Cursor, or all detected. You can pick more than one.
 2. **Where should we check?** Global (your home folder and environment variables), project (the current folder), or both.
 
+The report opens with the score, one line per category and the top fixes. In a terminal it then asks whether to show every finding. `--details` prints them straight away.
+
 Flags skip the questions. If input is not a terminal, nothing is asked and the defaults (all agents, both scopes) are used.
 
 ```sh
@@ -32,14 +34,15 @@ npx betterloop-scan --prod-accounts 111122223333,444455556666
 npx betterloop-scan --json
 ```
 
-| Flag                    | Meaning                                                           |
-| ----------------------- | ----------------------------------------------------------------- |
-| `--agent <list>`        | `claude-code`, `codex`, `cursor` or `all`. Comma-separated.       |
-| `--scope <scope>`       | `global`, `project` or `both` (default).                          |
-| `--path <dir>`          | Project folder. Defaults to the current folder.                   |
-| `--prod-accounts <ids>` | 12-digit AWS account IDs to treat as production. Comma-separated. |
-| `--json`                | Machine-readable output. Never asks questions.                    |
-| `--home <dir>`          | Use another folder as the home folder. Mostly for tests.          |
+| Flag                    | Meaning                                                                                         |
+| ----------------------- | ----------------------------------------------------------------------------------------------- |
+| `--agent <list>`        | `claude-code`, `codex`, `cursor` or `all`. Comma-separated.                                     |
+| `--scope <scope>`       | `global`, `project` or `both` (default).                                                        |
+| `--path <dir>`          | Project folder. Defaults to the current folder.                                                 |
+| `--prod-accounts <ids>` | 12-digit AWS account IDs to treat as production. Comma-separated.                               |
+| `--details`             | Print every finding. Otherwise only the score, a line per category and the top fixes are shown. |
+| `--json`                | Machine-readable output. Never asks questions.                                                  |
+| `--home <dir>`          | Use another folder as the home folder. Mostly for tests.                                        |
 
 The exit code is `0` on success, even when findings exist. Bad flags exit with `2`.
 

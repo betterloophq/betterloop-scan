@@ -6,6 +6,8 @@ import type { Ctx } from "../types.js"
 const ROTATE = "Move it to a secret manager and rotate it."
 
 function aws(ctx: Ctx) {
+  // A profile usually appears in both files. Flag a production profile once.
+  const prodProfiles = new Set<string>()
   const credFile = join(ctx.home, ".aws/credentials")
   const creds = read(credFile)
   if (creds)
@@ -22,14 +24,16 @@ function aws(ctx: Ctx) {
           ? "Replace static keys with AWS SSO and delete this key."
           : "Prefer SSO. Temporary keys expire, but still let agents act as you.",
       })
-      if (isProdName(profile))
+      if (isProdName(profile) && !prodProfiles.has(profile)) {
+        prodProfiles.add(profile)
         ctx.add({
           category: "cloud",
           severity: "high",
           title: `AWS profile "${profile}" looks like production`,
           location: ctx.display(credFile),
-          fix: "Keep production credentials off machines that run AI agents.",
+          fix: "Keep production access off machines that run AI agents.",
         })
+      }
     }
   const confFile = join(ctx.home, ".aws/config")
   const conf = read(confFile)
@@ -48,7 +52,8 @@ function aws(ctx: Ctx) {
       const onProdAccount = ctx.prodAccounts.some((id) =>
         [kv.sso_account_id, kv.role_arn].some((v) => v?.includes(id))
       )
-      if (isProdName(name) || onProdAccount)
+      if ((isProdName(name) || onProdAccount) && !prodProfiles.has(name)) {
+        prodProfiles.add(name)
         ctx.add({
           category: "cloud",
           severity: "high",
@@ -58,6 +63,7 @@ function aws(ctx: Ctx) {
           location: ctx.display(confFile),
           fix: "Keep production access off machines that run AI agents.",
         })
+      }
     }
   const id = ctx.env.AWS_ACCESS_KEY_ID
   if (id) {
@@ -205,7 +211,9 @@ function tokens(ctx: Ctx) {
       v &&
       k !== "AWS_ACCESS_KEY_ID" &&
       /(_TOKEN|_SECRET|_KEY|_PASSWORD)$|^GITHUB_TOKEN$/.test(k) &&
-      !/PUBLIC|PUBLISHABLE/.test(k)
+      !/PUBLIC|PUBLISHABLE/.test(k) &&
+      // Short-lived tokens IDEs inject into their own terminals, not stored secrets.
+      !/^VSCODE_|_IDE_AUTH_TOKEN$/.test(k)
     )
       ctx.add({
         category: "cloud",

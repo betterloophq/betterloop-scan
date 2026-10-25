@@ -440,7 +440,7 @@ function capture(answers: string[] = [], stdin = new PassThrough()) {
   const stdout = new Writable({
     write(c, _e, cb) {
       text += c
-      if (/\[\d\]: $/.test(String(c)))
+      if (/(\[\d\]: |\[y\/N\] )$/.test(String(c)))
         setImmediate(() => stdin.write(answers.shift() + "\n"))
       cb()
     },
@@ -465,12 +465,12 @@ describe("cli", () => {
     expect(c.text()).toContain(
       "Scope: global and project, agents: Claude Code, Codex, Cursor"
     )
-    expect(c.text()).toContain("Top 5 fixes")
+    expect(c.text()).toContain("Top fixes")
   })
   it("asks both questions on a TTY", async () => {
     const s = sandbox()
     s.inHome(".codex/config.toml", 'approval_policy = "never"')
-    const c = capture(["2", "3"])
+    const c = capture(["2", "3", "y"])
     const code = await run(["--home", s.home, "--path", s.project], {
       env: { PATH: "" },
       stdin: c.stdin,
@@ -520,7 +520,7 @@ describe("cli", () => {
       (r) =>
         void seen.push({
           score: r.score,
-          printed: c.text().includes("Top 5 fixes"),
+          printed: c.text().includes("Top fixes"),
         })
     )
     expect(seen).toEqual([{ score: 100, printed: true }])
@@ -572,7 +572,7 @@ describe("cli", () => {
       ].join("\n")
     )
     const env = { PATH: "", AWS_ACCESS_KEY_ID: AKIA, MY_TOKEN: GHP }
-    for (const extra of [[], ["--json"]]) {
+    for (const extra of [[], ["--json"], ["--details"]]) {
       const c = capture()
       await run(["--home", s.home, "--path", s.project, ...extra], {
         env,
@@ -612,5 +612,111 @@ describe("static guarantees", () => {
     const banned =
       /\b(?:writeFile|writeFileSync|appendFile|appendFileSync|unlink|unlinkSync|rm|rmSync|rename|renameSync|mkdir|mkdirSync|copyFile)\s*\(/
     for (const [file, text] of sources) expect(text, file).not.toMatch(banned)
+  })
+})
+
+describe("compact report", () => {
+  function fixture() {
+    const s = sandbox()
+    s.inHome(
+      ".aws/credentials",
+      `[default]\naws_access_key_id = ${AKIA}\n[team-prod]\naws_access_key_id = ${AKIA}\n`
+    )
+    s.inHome(".aws/config", "[profile team-prod]\nregion = eu-west-1\n")
+    for (const n of ["a", "b", "c", "d"])
+      s.inHome(`.ssh/id_${n}`, sshHeader("none"))
+    return s
+  }
+  async function cli(
+    s: ReturnType<typeof sandbox>,
+    opts: {
+      tty?: boolean
+      answers?: string[]
+      env?: Env
+      extra?: string[]
+    } = {}
+  ) {
+    const c = capture(opts.answers ?? [])
+    await run(
+      [
+        "--agent",
+        "all",
+        "--scope",
+        "both",
+        "--home",
+        s.home,
+        "--path",
+        s.project,
+        ...(opts.extra ?? []),
+      ],
+      {
+        env: { PATH: "", ...opts.env },
+        stdin: c.stdin,
+        stdout: c.stdout,
+        isTTY: opts.tty ?? false,
+        platform: "linux",
+        cwd: s.project,
+      }
+    )
+    return c.text()
+  }
+  it("shows the score, one line per category and grouped fixes, and hides findings", async () => {
+    const text = await cli(fixture())
+    expect(text).toMatch(/\d+ \/ 100 {3}(SMALL|MEDIUM|LARGE) blast radius/)
+    expect(text).toMatch(/SSH keys +4 high +-30 \(max\)/)
+    expect(text).toMatch(/Database +✓ nothing found/)
+    expect(text).toContain(
+      "Replace static keys with AWS SSO and delete this key.  (2 findings)"
+    )
+    expect(text).toContain("findings hidden. Run with --details to see them.")
+    expect(text).not.toContain("where:")
+  })
+  it("--details prints every finding without asking", async () => {
+    const text = await cli(fixture(), { tty: true, extra: ["--details"] })
+    expect(text).toContain("where: ~/.ssh/id_a")
+    expect(text).not.toContain("Show them? [y/N]")
+  })
+  it("on a terminal, asks before showing findings", async () => {
+    const shown = await cli(fixture(), { tty: true, answers: ["y"] })
+    expect(shown).toContain("findings hidden. Show them? [y/N]")
+    expect(shown).toContain("where: ~/.ssh/id_a")
+    const hidden = await cli(fixture(), { tty: true, answers: [""] })
+    expect(hidden).not.toContain("where:")
+  })
+  it("colors only on a terminal, and never with NO_COLOR", async () => {
+    expect(await cli(fixture(), { tty: true, answers: [""] })).toContain(
+      "\x1b["
+    )
+    expect(await cli(fixture())).not.toContain("\x1b[")
+    expect(
+      await cli(fixture(), { tty: true, answers: [""], env: { NO_COLOR: "1" } })
+    ).not.toContain("\x1b[")
+  })
+  it("says nothing is hidden when there is nothing to show", async () => {
+    const text = await cli(sandbox())
+    expect(text).toContain("100 / 100")
+    expect(text).toContain("None needed.")
+    expect(text).not.toContain("hidden")
+  })
+})
+
+describe("scoring fixes", () => {
+  it("flags a production AWS profile once, even when it is in both files", () => {
+    const s = sandbox()
+    s.inHome(".aws/credentials", `[team-prod]\naws_access_key_id = ${ASIA}\n`)
+    s.inHome(".aws/config", "[profile team-prod]\nregion = eu-west-1\n")
+    const f = go(s, "global", []).findings
+    expect(
+      f.filter((x) => x.title.includes("looks like production"))
+    ).toHaveLength(1)
+  })
+  it("ignores session tokens that IDEs inject into their terminals", () => {
+    const s = sandbox()
+    const f = go(s, "global", [], {
+      VSCODE_GIT_IPC_AUTH_TOKEN: "x".repeat(64),
+      GEMINI_CLI_IDE_AUTH_TOKEN: "y".repeat(36),
+      MY_API_TOKEN: "z".repeat(20),
+    }).findings
+    expect(f.map((x) => x.location)).toEqual(["MY_API_TOKEN"])
   })
 })
