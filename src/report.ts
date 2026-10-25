@@ -7,7 +7,10 @@ const CATEGORIES: [Category, string, string][] = [
   ["agents", "2. What the agents can run", "Agents"],
   ["ssh", "3. SSH keys", "SSH keys"],
   ["cloud", "4. Cloud credentials and secrets", "Cloud"],
+  ["environments", "5. Environments (your team's rules)", "Environments"],
 ]
+// Shown only when a caller added findings to it.
+const optional = new Set<Category>(["environments"])
 const SEVERITIES: Severity[] = ["critical", "high", "medium", "low"]
 const SCOPE_TEXT = {
   global: "global (home folder and environment variables)",
@@ -66,6 +69,7 @@ export function compact(
     const found = r.findings.filter(
       (f) => f.category === cat && f.severity !== "info"
     )
+    if (!found.length && optional.has(cat)) continue
     if (!found.length) {
       out.push(`   ${name.padEnd(11)} ${paint("32", "✓")} nothing found`)
       continue
@@ -95,8 +99,9 @@ export function compact(
 export function details(r: ScanResult): string {
   const out = [""]
   for (const [cat, title] of CATEGORIES) {
-    out.push(title)
     const found = r.findings.filter((f) => f.category === cat)
+    if (!found.length && optional.has(cat)) continue
+    out.push(title)
     if (!found.length) out.push("  Nothing found.")
     for (const f of found)
       out.push(

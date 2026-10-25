@@ -1,5 +1,6 @@
 export type Severity = "critical" | "high" | "medium" | "low" | "info"
-export type Category = "database" | "agents" | "ssh" | "cloud"
+// "environments" is only produced by callers that judge findings against their own environment rules.
+export type Category = "database" | "agents" | "ssh" | "cloud" | "environments"
 export type AgentId = "claude-code" | "codex" | "cursor"
 export type Scope = "global" | "project" | "both"
 export type Env = Record<string, string | undefined>

@@ -11,7 +11,7 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { PassThrough, Readable, Writable } from "node:stream"
 import { run } from "./cli.js"
-import { scan } from "./scan.js"
+import { scan, type ScanResult } from "./scan.js"
 import type { AgentId, Env, Finding, Scope } from "./types.js"
 import { isProdName } from "./fsx.js"
 import { CATEGORY_CAP, WEIGHTS, label, score } from "./weights.js"
@@ -517,11 +517,13 @@ describe("cli", () => {
         platform: "linux",
         cwd: s.project,
       },
-      (r) =>
-        void seen.push({
-          score: r.score,
-          printed: c.text().includes("Top fixes"),
-        })
+      {
+        onResult: (r) =>
+          void seen.push({
+            score: r.score,
+            printed: c.text().includes("Top fixes"),
+          }),
+      }
     )
     expect(seen).toEqual([{ score: 100, printed: true }])
   })
@@ -538,7 +540,7 @@ describe("cli", () => {
         platform: "linux",
         cwd: "/",
       },
-      () => void (called = true)
+      { onResult: () => void (called = true) }
     )
     expect(code).toBe(2)
     expect(called).toBe(false)
@@ -828,8 +830,7 @@ describe("caller section", () => {
           platform: "linux",
           cwd: s.project,
         },
-        undefined,
-        () => "CALLER SECTION\n"
+        { section: () => "CALLER SECTION\n" }
       )
       return c.text()
     }
@@ -841,5 +842,55 @@ describe("caller section", () => {
       details.indexOf("where:")
     )
     expect(await out(["--json"])).not.toContain("CALLER SECTION")
+  })
+})
+
+describe("adjust hook", () => {
+  it("adds caller findings to the score, the category lines and the details", async () => {
+    const s = sandbox()
+    const run1 = async (
+      adjust?: (r: ScanResult) => ScanResult,
+      extra: string[] = []
+    ) => {
+      const c = capture()
+      let seen: ScanResult | undefined
+      await run(
+        ["--home", s.home, "--path", s.project, ...extra],
+        {
+          env: { PATH: "" },
+          stdin: new Readable({ read() {} }),
+          stdout: c.stdout,
+          isTTY: false,
+          platform: "linux",
+          cwd: s.project,
+        },
+        { adjust, onResult: (r) => void (seen = r) }
+      )
+      return { text: c.text(), seen: seen! }
+    }
+    const plain = await run1()
+    expect(plain.seen.score).toBe(100)
+    expect(plain.text).not.toContain("Environments")
+    const adjusted = await run1(
+      (r) => ({
+        ...r,
+        findings: [
+          ...r.findings,
+          {
+            category: "environments",
+            severity: "critical",
+            title: "Production reachable, not allowed",
+            location: "~/.aws/config",
+            fix: "Remove it.",
+          },
+        ],
+      }),
+      ["--details"]
+    )
+    expect(adjusted.seen.score).toBe(80)
+    expect(adjusted.text).toContain("80 / 100")
+    expect(adjusted.text).toMatch(/Environments +1 critical +-20/)
+    expect(adjusted.text).toContain("5. Environments (your team's rules)")
+    expect(adjusted.text).toContain("Production reachable, not allowed")
   })
 })

@@ -5,6 +5,7 @@ import type { Readable, Writable } from "node:stream"
 import { detectAgents } from "./checks/agents.js"
 import { compact, details, jsonReport } from "./report.js"
 import { scan, type ScanResult } from "./scan.js"
+import { label, score } from "./weights.js"
 import { AGENT_NAMES, type AgentId, type Env, type Scope } from "./types.js"
 
 export interface Io {
@@ -64,14 +65,20 @@ function pickAgents(
   return picked
 }
 
-// `onResult` runs after the report is printed, so a slow hook never delays the output.
-// `section` adds text right after the summary, before any findings.
-// Neither may throw: an error here is reported as a failed run.
+/** Hooks for callers that build on the scan. None may throw: an error is reported as a failed run. */
+export interface RunHooks {
+  /** Changes the result before anything is printed. Score and label are recomputed from its findings. */
+  adjust?: (result: ScanResult) => ScanResult
+  /** Text printed right after the summary, before any findings. Not used with --json. */
+  section?: (result: ScanResult) => string
+  /** Runs after the report is printed, so a slow hook never delays the output. */
+  onResult?: (result: ScanResult) => Promise<void> | void
+}
+
 export async function run(
   argv: string[],
   io: Io,
-  onResult?: (result: ScanResult) => Promise<void> | void,
-  section?: (result: ScanResult) => string
+  { adjust, section, onResult }: RunHooks = {}
 ): Promise<number> {
   const out = (s: string) => void io.stdout.write(s)
   if (io.platform === "win32") {
@@ -146,7 +153,7 @@ export async function run(
     for (const id of prodAccounts)
       if (!/^\d{12}$/.test(id))
         throw new Error("--prod-accounts needs 12-digit AWS account IDs")
-    const result = scan({
+    let result = scan({
       agents,
       scope,
       path,
@@ -154,6 +161,11 @@ export async function run(
       env: io.env,
       prodAccounts,
     })
+    if (adjust) {
+      result = adjust(result)
+      const s = score(result.findings)
+      result = { ...result, score: s, label: label(s) }
+    }
     if (args.json) out(jsonReport(result, notes))
     else {
       const color = io.isTTY && !io.env.NO_COLOR
