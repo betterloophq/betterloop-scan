@@ -32,6 +32,7 @@ export function checkSsh(ctx: Ctx) {
     const head = readHead(file, 600)
     const protectedKey = head === undefined ? undefined : safe(head)
     if (protectedKey === undefined) continue
+    ctx.reach({ kind: "ssh_key", name, location: ctx.display(file) })
     ctx.add({
       category: "ssh",
       severity: protectedKey ? "info" : "high",
@@ -63,9 +64,29 @@ export function checkSsh(ctx: Ctx) {
 
   const config = read(join(dir, "config"))
   if (config) {
-    const hosts = [...config.matchAll(/^\s*Host\s+(.+)$/gim)]
-      .flatMap((m) => m[1].trim().split(/\s+/))
-      .filter((h) => !/[*?!]/.test(h))
+    // ponytail: Host blocks only. Match blocks and Include files are not followed.
+    const blocks: { aliases: string[]; host?: string; user?: string }[] = []
+    for (const line of config.split(/\r?\n/)) {
+      const m = /^\s*(Host|HostName|User)\s+(.+?)\s*$/i.exec(line)
+      if (!m) continue
+      const key = m[1].toLowerCase()
+      if (key === "host")
+        blocks.push({
+          aliases: m[2].split(/\s+/).filter((h) => !/[*?!]/.test(h)),
+        })
+      else if (blocks.length)
+        blocks[blocks.length - 1][key === "hostname" ? "host" : "user"] = m[2]
+    }
+    const hosts = blocks.flatMap((b) => b.aliases)
+    for (const b of blocks)
+      for (const alias of b.aliases)
+        ctx.reach({
+          kind: "ssh_host",
+          name: alias,
+          host: b.host,
+          role: b.user,
+          location: ctx.display(join(dir, "config")),
+        })
     ctx.add({
       category: "ssh",
       severity: "info",

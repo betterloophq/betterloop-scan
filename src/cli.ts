@@ -65,11 +65,13 @@ function pickAgents(
 }
 
 // `onResult` runs after the report is printed, so a slow hook never delays the output.
-// It must not throw: an error here is reported as a failed run.
+// `section` adds text right after the summary, before any findings.
+// Neither may throw: an error here is reported as a failed run.
 export async function run(
   argv: string[],
   io: Io,
-  onResult?: (result: ScanResult) => Promise<void> | void
+  onResult?: (result: ScanResult) => Promise<void> | void,
+  section?: (result: ScanResult) => string
 ): Promise<number> {
   const out = (s: string) => void io.stdout.write(s)
   if (io.platform === "win32") {
@@ -156,6 +158,7 @@ export async function run(
     else {
       const color = io.isTTY && !io.env.NO_COLOR
       out(compact(result, notes, color))
+      if (section) out(section(result))
       const hidden = result.findings.length
       if (args.details) out(details(result))
       else if (hidden && io.isTTY) {

@@ -720,3 +720,126 @@ describe("scoring fixes", () => {
     expect(f.map((x) => x.location)).toEqual(["MY_API_TOKEN"])
   })
 })
+
+describe("reach inventory", () => {
+  const ACCT = "123456789" + "012"
+  function fixture() {
+    const s = sandbox()
+    s.inHome(".aws/credentials", `[team-dev]\naws_access_key_id = ${ASIA}\n`)
+    s.inHome(
+      ".aws/config",
+      `[profile team-dev]\nregion = eu-west-1\n[profile ops]\nsso_account_id = ${ACCT}\nsso_role_name = ReadOnlyAccess\n[profile admin]\nrole_arn = arn:aws:iam::${ACCT}:role/Admin\n`
+    )
+    s.inHome(
+      ".kube/config",
+      "contexts:\n- context:\n    cluster: eks-payments\n    user: deployer\n  name: payments-staging\n"
+    )
+    s.inHome(
+      ".ssh/config",
+      "Host bastion\n  HostName bastion.internal.example\n  User ops\n"
+    )
+    s.inHome(".ssh/id_open", sshHeader("none"))
+    s.inHome(
+      ".azure/azureProfile.json",
+      JSON.stringify({ subscriptions: [{ id: "sub-1", name: "Payments" }] })
+    )
+    s.inHome(
+      ".config/gcloud/configurations/config_default",
+      "[core]\nproject = payments-dev\n"
+    )
+    s.inProject(
+      ".env.staging",
+      "DATABASE_URL=postgres://app_ro:pw@db.staging.example/app\n"
+    )
+    return s
+  }
+  it("records every reachable system with its non-secret identifiers", () => {
+    const r = go(fixture(), "both", []).reach
+    const find = (kind: string, name: string) =>
+      r.find((x) => x.kind === kind && x.name === name)
+    expect(find("aws_profile", "team-dev")).toBeTruthy()
+    expect(r.filter((x) => x.name === "team-dev")).toHaveLength(1)
+    expect(find("aws_profile", "ops")).toMatchObject({
+      account: ACCT,
+      role: "ReadOnlyAccess",
+    })
+    expect(find("aws_profile", "admin")).toMatchObject({
+      account: ACCT,
+      role: "Admin",
+    })
+    expect(find("kube_context", "payments-staging")).toMatchObject({
+      host: "eks-payments",
+      role: "deployer",
+    })
+    expect(find("ssh_host", "bastion")).toMatchObject({
+      host: "bastion.internal.example",
+      role: "ops",
+    })
+    expect(find("ssh_key", "id_open")).toBeTruthy()
+    expect(find("azure_subscription", "Payments")).toMatchObject({
+      account: "sub-1",
+    })
+    expect(find("gcp_project", "payments-dev")).toBeTruthy()
+    expect(find("env_file", ".env.staging")).toBeTruthy()
+    expect(find("database", "DATABASE_URL")).toMatchObject({
+      host: "db.staging.example",
+      role: "app_ro",
+    })
+  })
+  it("never prints the inventory's identifiers in terminal or JSON output", async () => {
+    const s = fixture()
+    for (const extra of [["--details"], ["--json"]]) {
+      const c = capture()
+      await run(["--home", s.home, "--path", s.project, ...extra], {
+        env: { PATH: "" },
+        stdin: new Readable({ read() {} }),
+        stdout: c.stdout,
+        isTTY: false,
+        platform: "linux",
+        cwd: s.project,
+      })
+      for (const value of [
+        ACCT,
+        "ReadOnlyAccess",
+        "eks-payments",
+        "bastion.internal.example",
+        "db.staging.example",
+        "app_ro",
+        "sub-1",
+      ])
+        expect(c.text(), value).not.toContain(value)
+    }
+  })
+})
+
+describe("caller section", () => {
+  it("prints the caller's section after the summary and before findings, never in JSON", async () => {
+    const s = sandbox()
+    s.inHome(".ssh/id_open", sshHeader("none"))
+    const out = async (extra: string[]) => {
+      const c = capture()
+      await run(
+        ["--home", s.home, "--path", s.project, ...extra],
+        {
+          env: { PATH: "" },
+          stdin: new Readable({ read() {} }),
+          stdout: c.stdout,
+          isTTY: false,
+          platform: "linux",
+          cwd: s.project,
+        },
+        undefined,
+        () => "CALLER SECTION\n"
+      )
+      return c.text()
+    }
+    const details = await out(["--details"])
+    expect(details.indexOf("Top fixes")).toBeLessThan(
+      details.indexOf("CALLER SECTION")
+    )
+    expect(details.indexOf("CALLER SECTION")).toBeLessThan(
+      details.indexOf("where:")
+    )
+    expect(await out(["--json"])).not.toContain("CALLER SECTION")
+  })
+})

@@ -63,6 +63,8 @@ console.log(result.score, result.label)
 
 `scan` is synchronous and read-only. Findings carry masked text only, never secret values.
 
+`result.reach` lists what an agent on this machine could use to reach a system (AWS profiles with account and role, kube contexts, SSH hosts, database hosts, `.env` files and more), with non-secret identifiers only. It is never printed and never part of `--json`; it exists so a caller can match it against its own environment list.
+
 `run(argv, io, onResult)` runs the full CLI (flags, questions, report) and calls `onResult` with the result after printing.
 
 ## What it checks

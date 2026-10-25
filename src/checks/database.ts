@@ -15,7 +15,11 @@ function parseUrl(rest: string) {
     ? first.slice(1, first.indexOf("]"))
     : first.replace(/:\d+$/, "")
   const colon = userinfo.indexOf(":")
-  return { host, password: colon >= 0 && colon < userinfo.length - 1 }
+  return {
+    host,
+    user: colon >= 0 ? userinfo.slice(0, colon) : userinfo,
+    password: colon >= 0 && colon < userinfo.length - 1,
+  }
 }
 
 type Kind = "local" | "production" | "remote"
@@ -32,9 +36,17 @@ function report(
   key: string,
   scheme: string,
   host: string,
-  password: boolean
+  password: boolean,
+  user = ""
 ) {
   if (!host || /[${}]/.test(host)) return
+  ctx.reach({
+    kind: "database",
+    name: key,
+    host,
+    role: user || undefined,
+    location: where,
+  })
   const kind = classify(host, key)
   const pw = password ? ", password in URL" : ""
   const severity =
@@ -61,8 +73,8 @@ function scanText(ctx: Ctx, where: string, key: string, value: string) {
   if (HOST_KEY.test(key) && value && !value.includes("://"))
     report(ctx, where, key, "host", value, false)
   for (const m of value.matchAll(URL_RE)) {
-    const { host, password } = parseUrl(m[2])
-    report(ctx, where, key, m[1], host, password)
+    const { host, password, user } = parseUrl(m[2])
+    report(ctx, where, key, m[1], host, password, user)
   }
 }
 
@@ -75,6 +87,11 @@ export function checkDatabase(ctx: Ctx, projectFiles: string[]) {
     if (!/^\.env/.test(file.split("/").pop()!)) continue
     const text = read(file)
     if (!text) continue
+    ctx.reach({
+      kind: "env_file",
+      name: ctx.display(file),
+      location: ctx.display(file),
+    })
     for (const line of text.split(/\r?\n/)) {
       const kv = /^\s*(?:export\s+)?([A-Za-z0-9_.-]+)\s*=\s*(.*)$/.exec(line)
       if (kv)

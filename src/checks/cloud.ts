@@ -14,6 +14,11 @@ function aws(ctx: Ctx) {
     for (const [profile, kv] of sections(creds)) {
       const id = kv.aws_access_key_id
       if (!id) continue
+      ctx.reach({
+        kind: "aws_profile",
+        name: profile,
+        location: ctx.display(credFile),
+      })
       const longLived = id.startsWith("AKIA")
       ctx.add({
         category: "cloud",
@@ -41,6 +46,17 @@ function aws(ctx: Ctx) {
     for (const [section, kv] of sections(conf)) {
       if (!section) continue
       const name = section.replace(/^profile\s+/, "")
+      // arn:aws:iam::<account>:role/<name>
+      const arn = /^arn:aws[\w-]*:iam::(\d{12}):role\/(.+)$/.exec(
+        kv.role_arn ?? ""
+      )
+      ctx.reach({
+        kind: "aws_profile",
+        name,
+        account: kv.sso_account_id ?? arn?.[1],
+        role: kv.sso_role_name ?? arn?.[2],
+        location: ctx.display(confFile),
+      })
       if (Object.keys(kv).some((k) => k.startsWith("sso_") || k === "role_arn"))
         ctx.add({
           category: "cloud",
@@ -67,6 +83,11 @@ function aws(ctx: Ctx) {
     }
   const id = ctx.env.AWS_ACCESS_KEY_ID
   if (id) {
+    ctx.reach({
+      kind: "aws_env_key",
+      name: "AWS_ACCESS_KEY_ID",
+      location: "AWS_ACCESS_KEY_ID",
+    })
     const longLived = id.startsWith("AKIA")
     ctx.add({
       category: "cloud",
@@ -97,6 +118,12 @@ function gcloud(ctx: Ctx) {
     const project = [...sections(text).values()]
       .map((kv) => kv.project)
       .find(Boolean)
+    if (project)
+      ctx.reach({
+        kind: "gcp_project",
+        name: project,
+        location: ctx.display(file),
+      })
     if (project && isProdName(project))
       ctx.add({
         category: "cloud",
@@ -124,6 +151,16 @@ function azure(ctx: Ctx) {
     read(join(dir, n))
   )
   if (!profile && !cache) return
+  for (const s of Array.isArray(profile?.subscriptions)
+    ? profile.subscriptions
+    : [])
+    if (typeof s?.id === "string")
+      ctx.reach({
+        kind: "azure_subscription",
+        name: typeof s.name === "string" ? s.name : s.id,
+        account: s.id,
+        location: ctx.display(join(dir, "azureProfile.json")),
+      })
   const subs = Array.isArray(profile?.subscriptions)
     ? profile.subscriptions.length
     : 0
@@ -140,15 +177,29 @@ function kube(ctx: Ctx) {
   const file = join(ctx.home, ".kube/config")
   const text = read(file)
   if (!text) return
-  const names: string[] = []
+  // ponytail: line-based. Each "- " item under contexts: is one context.
+  const items: { name?: string; cluster?: string; user?: string }[] = []
   let inContexts = false
   for (const line of text.split(/\r?\n/)) {
     if (/^[A-Za-z]/.test(line)) inContexts = line.startsWith("contexts:")
     else if (inContexts) {
-      const m = /^\s*(?:-\s+)?name:\s*["']?([^"'\s#]+)/.exec(line)
-      if (m) names.push(m[1])
+      if (/^\s*-\s/.test(line)) items.push({})
+      const m = /^\s*(?:-\s+)?(name|cluster|user):\s*["']?([^"'\s#]+)/.exec(
+        line
+      )
+      if (m && items.length) items[items.length - 1][m[1] as "name"] = m[2]
     }
   }
+  const names = items.map((i) => i.name).filter((n): n is string => !!n)
+  for (const i of items)
+    if (i.name)
+      ctx.reach({
+        kind: "kube_context",
+        name: i.name,
+        host: i.cluster,
+        role: i.user,
+        location: ctx.display(file),
+      })
   // EKS contexts and clusters carry the account ID inside their ARN.
   if (ctx.prodAccounts.some((id) => text.includes(id)))
     ctx.add({
